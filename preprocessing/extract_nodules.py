@@ -19,6 +19,7 @@ MUST_CONTAIN = [
     "CoordY",
     "CoordZ",
     "PatientID",
+    "LesionID"
 ]
 
 SAVE_FORMATS = [
@@ -91,8 +92,8 @@ class NoduleExtractor:
 
             pd = subset.iloc[i]
             output_path = (
-                    self.output_path
-                    / f"{pd.NoduleID}_{int(pd.StudyDate)}{self.postfix}{self.save_format}"
+                self.output_path
+                / f"{pd.AnnotationID}{self.postfix}{self.save_format}"
             )
 
             if Path(output_path).is_file():
@@ -105,53 +106,32 @@ class NoduleExtractor:
 
                     pad = False
 
-                    coords = np.array(
-                        [
-                            subset.CoordX,
-                            subset.CoordY,
-                            subset.CoordZ,
-                        ]
-                    ).transpose()
+                    index_coord = np.array(image.TransformPhysicalPointToIndex(coord))
+                    min_coordinate_out_of_bounds = np.any(index_coord - extent < 0)
+                    max_coordinate_out_of_bounds = np.any(index_coord + extent > np.array(image.GetSize()))
 
-                    for coord in coords:
-
-                        coord = np.array(image.TransformPhysicalPointToIndex(coord))
-                        upper_limit_breach = np.any(coord - extent < 0)
-                        lower_limit_breach = np.any(coord + extent > np.array(image.GetSize()))
-
-                        if upper_limit_breach or lower_limit_breach:
-                            pad = True
+                    if min_coordinate_out_of_bounds or max_coordinate_out_of_bounds:
+                        pad = True
 
                     if pad:
-
                         image = sitk.ConstantPad(
                             image,
                             [int(e) for e in extent],
                             [int(e) for e in extent],
                             constant=-1024,
                         )
+                        index_coord = image.TransformPhysicalPointToIndex(coord)
 
-                    for i, coord in enumerate(coords):
+                    image_patch = image[
+                        int(index_coord[0] - extent[0]): int(index_coord[0] + extent[0]),
+                        int(index_coord[1] - extent[1]): int(index_coord[1] + extent[1]),
+                        int(index_coord[2] - extent[2]): int(index_coord[2] + extent[2]),
+                    ]
 
-                        coord = image.TransformPhysicalPointToIndex(coord)
-
-                        pd = subset.iloc[i]
-
-                        output_path = (
-                            self.output_path
-                            / f"{pd.NoduleID}_{int(pd.StudyDate)}{self.postfix}{self.save_format}"
-                        )
-
-                        image_patch = image[
-                            int(coord[0] - extent[0]) : int(coord[0] + extent[0]),
-                            int(coord[1] - extent[1]) : int(coord[1] + extent[1]),
-                            int(coord[2] - extent[2]) : int(coord[2] + extent[2]),
-                        ]
-
-                        if image_patch.GetSize() == tuple(self.patch_size):
-                            sitk.WriteImage(image_patch, str(output_path), True)
-                        else:
-                            logging.info(f"Incorrect patch size in: {seriesuid}")
+                    if image_patch.GetSize() == tuple(self.patch_size):
+                        sitk.WriteImage(image_patch, str(output_path), True)
+                    else:
+                        logging.info(f"Incorrect patch size in: {seriesuid}")
 
                 else:
                     logging.info(f"Missing mha file: {str(image_path)}")
